@@ -4,8 +4,7 @@ export default function Step4({ form }: { form: FormState }) {
   return (
     <div className="space-y-4 text-sm">
       <p className="text-muted-foreground">
-        Here&rsquo;s a quick summary of what you&rsquo;ve entered. You can go
-        back to any step to make changes before submitting.
+        Here&rsquo;s a quick summary of what you&rsquo;ve entered.
       </p>
       <div className="space-y-3 rounded-lg border bg-muted/40 p-4">
         <div>
