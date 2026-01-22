@@ -234,8 +234,7 @@ export default function StepProgress() {
           <div className="rounded-lg border bg-secondary/30 p-4 text-sm">
             <p className="font-medium">Form submitted!</p>
             <p className="mt-1 text-muted-foreground">
-              This demo doesn&apos;t send your data anywhere, but this is what
-              would be submitted:
+              This is what would be submitted:
             </p>
           </div>
           <pre className="max-h-56 overflow-auto rounded-lg bg-muted p-3 text-xs">
