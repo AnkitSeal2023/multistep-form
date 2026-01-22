@@ -3,12 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import Step1 from "./steps/step1";
+import Step2 from "./steps/step2";
+import Step3 from "./steps/step3";
+import Step4 from "./steps/step4";
+import { stepDescriptions, stepTitles } from "./mockdata";
 
 const TOTAL_STEPS = 4;
 const STORAGE_KEY = "multistep-form-progress";
 const DEBOUNCE_DELAY = 500; // milliseconds
 
-type FormState = {
+export type FormState = {
   name: string;
   email: string;
   age: string;
@@ -33,19 +38,8 @@ const initialState: FormState = {
   updates: true,
 };
 
-const stepTitles = [
-  "Basic details",
-  "Address",
-  "Preferences",
-  "Review & submit",
-];
-
-const stepDescriptions = [
-  "Tell us a little bit about yourself.",
-  "Where can we reach you?",
-  "Choose how you want to hear from us.",
-  "Confirm that everything looks good before submitting.",
-];
+const stepTitle = stepTitles;
+const stepDescription = stepDescriptions;
 
 const loadFromStorage = (): StoredState | null => {
   if (typeof window === "undefined") return null;
@@ -53,7 +47,6 @@ const loadFromStorage = (): StoredState | null => {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return null;
     const parsed = JSON.parse(stored) as StoredState;
-    // Validate the stored data structure
     if (
       parsed &&
       typeof parsed.step === "number" &&
@@ -92,18 +85,19 @@ export default function StepProgress() {
   const [form, setForm] = useState<FormState>(initialState);
   const [submitted, setSubmitted] = useState(false);
   const [touchedStep, setTouchedStep] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Debounce timer ref for form saves
+  // Debounce
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const prevStepRef = useRef(1);
   const isInitialMount = useRef(true);
 
-  // After hydration, load any saved progress from localStorage on the client
+  // load from localStorage
   useEffect(() => {
     const stored = loadFromStorage();
     if (!stored) return;
 
-    // Schedule state updates to the next frame to avoid synchronous setState in effect
     const raf = requestAnimationFrame(() => {
       setForm(stored.form);
       setStep(stored.step);
@@ -116,9 +110,7 @@ export default function StepProgress() {
   const progress = (step - 1) / (TOTAL_STEPS - 1);
   const translateX = `-${100 - progress * 100}%`;
 
-  // Save form changes with debouncing, step changes immediately
   useEffect(() => {
-    // Skip saving on initial mount (we just loaded from storage)
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
@@ -126,7 +118,6 @@ export default function StepProgress() {
 
     if (submitted) return;
 
-    // If step changed, save immediately and clear any pending debounce
     if (prevStepRef.current !== step) {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
@@ -137,7 +128,6 @@ export default function StepProgress() {
       return;
     }
 
-    // For form changes, debounce the save
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
@@ -146,20 +136,12 @@ export default function StepProgress() {
       saveToStorage(form, step);
     }, DEBOUNCE_DELAY);
 
-    // Cleanup on unmount
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
     };
   }, [form, step, submitted]);
-
-  const updateField = <K extends keyof FormState>(
-    key: K,
-    value: FormState[K],
-  ) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
 
   const requiredFieldsValid =
     form.name.trim().length > 0 &&
@@ -174,7 +156,6 @@ export default function StepProgress() {
       case 2:
         return form.street.trim().length > 0 && form.city.trim().length > 0;
       case 3:
-        // All optional for now
         return true;
       case 4:
         return requiredFieldsValid;
@@ -197,11 +178,10 @@ export default function StepProgress() {
     setStep((s) => Math.max(1, s - 1));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setTouchedStep(true);
 
     if (!requiredFieldsValid) {
-      // Jump back to the first missing required step
       if (!form.name.trim() || !form.email.trim()) {
         setStep(1);
       } else if (!form.street.trim() || !form.city.trim()) {
@@ -210,9 +190,37 @@ export default function StepProgress() {
       return;
     }
 
-    setSubmitted(true);
-    // Clear storage on successful submit
-    clearStorage();
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      const response = await fetch("/api/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(form),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to submit form");
+      }
+
+      const result = await response.json();
+      console.log("Submission successful:", result);
+
+      setSubmitted(true);
+      clearStorage();
+    } catch (error) {
+      console.error("Error submitting form:", error);
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "Failed to submit form. Please try again.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const showError =
@@ -253,188 +261,13 @@ export default function StepProgress() {
 
     switch (step) {
       case 1:
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="name">
-                Full name
-                <span className="ml-1 text-destructive">*</span>
-              </label>
-              <input
-                id="name"
-                type="text"
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/60"
-                value={form.name}
-                onChange={(e) => updateField("name", e.target.value)}
-                placeholder="Jane Doe"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="email">
-                Email address
-                <span className="ml-1 text-destructive">*</span>
-              </label>
-              <input
-                id="email"
-                type="email"
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/60"
-                value={form.email}
-                onChange={(e) => updateField("email", e.target.value)}
-                placeholder="you@example.com"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="age">
-                Age
-              </label>
-              <input
-                id="age"
-                type="number"
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/60"
-                value={form.age}
-                onChange={(e) => updateField("age", e.target.value)}
-                placeholder="Optional"
-              />
-            </div>
-          </div>
-        );
+        return <Step1 form={form} setForm={setForm} />;
       case 2:
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="street">
-                Street address
-                <span className="ml-1 text-destructive">*</span>
-              </label>
-              <input
-                id="street"
-                type="text"
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/60"
-                value={form.street}
-                onChange={(e) => updateField("street", e.target.value)}
-                placeholder="123 Main St"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium" htmlFor="city">
-                City
-                <span className="ml-1 text-destructive">*</span>
-              </label>
-              <input
-                id="city"
-                type="text"
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/60"
-                value={form.city}
-                onChange={(e) => updateField("city", e.target.value)}
-                placeholder="San Francisco"
-              />
-            </div>
-          </div>
-        );
+        return <Step2 form={form} setForm={setForm} />;
       case 3:
-        return (
-          <div className="space-y-4">
-            <label className="flex items-start gap-3 text-sm">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 rounded border bg-background text-primary shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                checked={form.newsletter}
-                onChange={(e) => updateField("newsletter", e.target.checked)}
-              />
-              <span>
-                <span className="font-medium">Product newsletter</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Get occasional updates about new features and improvements.
-                </span>
-              </span>
-            </label>
-
-            <label className="flex items-start gap-3 text-sm">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 rounded border bg-background text-primary shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                checked={form.updates}
-                onChange={(e) => updateField("updates", e.target.checked)}
-              />
-              <span>
-                <span className="font-medium">Security & account updates</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Critical updates about your account and security.
-                </span>
-              </span>
-            </label>
-          </div>
-        );
+        return <Step3 form={form} setForm={setForm} />;
       case 4:
-        return (
-          <div className="space-y-4 text-sm">
-            <p className="text-muted-foreground">
-              Here&apos;s a quick summary of what you&apos;ve entered. You can
-              go back to any step to make changes before submitting.
-            </p>
-            <div className="space-y-3 rounded-lg border bg-muted/40 p-4">
-              <div>
-                <p className="text-xs font-medium uppercase text-muted-foreground">
-                  Basic details
-                </p>
-                <p className="mt-1">
-                  {form.name || (
-                    <span className="text-muted-foreground">Name missing</span>
-                  )}
-                </p>
-                <p className="text-muted-foreground">
-                  {form.email || "Email missing"}
-                </p>
-                {form.age && (
-                  <p className="text-muted-foreground">
-                    Age:{" "}
-                    <span className="font-medium text-foreground">
-                      {form.age}
-                    </span>
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <p className="text-xs font-medium uppercase text-muted-foreground">
-                  Address
-                </p>
-                <p className="mt-1">
-                  {form.street || (
-                    <span className="text-muted-foreground">
-                      Street missing
-                    </span>
-                  )}
-                </p>
-                <p className="text-muted-foreground">
-                  {form.city || (
-                    <span className="text-muted-foreground">City missing</span>
-                  )}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs font-medium uppercase text-muted-foreground">
-                  Preferences
-                </p>
-                <ul className="mt-1 space-y-1 text-muted-foreground">
-                  <li>
-                    Newsletter:{" "}
-                    <span className="font-medium text-foreground">
-                      {form.newsletter ? "Yes" : "No"}
-                    </span>
-                  </li>
-                  <li>
-                    Security updates:{" "}
-                    <span className="font-medium text-foreground">
-                      {form.updates ? "Yes" : "No"}
-                    </span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        );
+        return <Step4 form={form} />;
       default:
         return null;
     }
@@ -442,9 +275,7 @@ export default function StepProgress() {
 
   return (
     <div className="w-full max-w-md space-y-6">
-      {/* Steps + progress */}
       <div className="relative flex items-center justify-between">
-        {/* Progress track */}
         <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2">
           <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
             <div
@@ -454,7 +285,6 @@ export default function StepProgress() {
           </div>
         </div>
 
-        {/* Step indicators */}
         {Array.from({ length: TOTAL_STEPS }).map((_, i) => {
           const n = i + 1;
           const completed = n < step || submitted;
@@ -486,7 +316,6 @@ export default function StepProgress() {
         })}
       </div>
 
-      {/* Card with step content */}
       <div className="space-y-4 rounded-2xl border bg-card p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -494,13 +323,13 @@ export default function StepProgress() {
               Step {submitted ? TOTAL_STEPS : step} of {TOTAL_STEPS}
             </p>
             <h2 className="mt-1 text-lg font-semibold tracking-tight">
-              {submitted ? "All done" : stepTitles[step - 1]}
+              {submitted ? "All done" : stepTitle[step - 1]}
             </h2>
           </div>
         </div>
         {!submitted && (
           <p className="text-sm text-muted-foreground">
-            {stepDescriptions[step - 1]}
+            {stepDescription[step - 1]}
           </p>
         )}
 
@@ -511,27 +340,33 @@ export default function StepProgress() {
             Please fill out the required fields on this step before continuing.
           </p>
         )}
+
+        {submitError && (
+          <p className="text-xs font-medium text-destructive">{submitError}</p>
+        )}
       </div>
 
-      {/* Navigation */}
       <div className="flex items-center justify-between gap-2">
         <Button
           variant="outline"
           onClick={handleBack}
-          disabled={step === 1 || submitted}
+          disabled={step === 1 || submitted || isSubmitting}
         >
           Back
         </Button>
 
         {!submitted && step < TOTAL_STEPS && (
-          <Button onClick={handleNext} disabled={!canGoNext}>
+          <Button onClick={handleNext} disabled={!canGoNext || isSubmitting}>
             Next
           </Button>
         )}
 
         {!submitted && step === TOTAL_STEPS && (
-          <Button onClick={handleSubmit} disabled={!requiredFieldsValid}>
-            Submit
+          <Button
+            onClick={handleSubmit}
+            disabled={!requiredFieldsValid || isSubmitting}
+          >
+            {isSubmitting ? "Submitting..." : "Submit"}
           </Button>
         )}
       </div>
